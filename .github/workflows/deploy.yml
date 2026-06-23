@@ -1,0 +1,64 @@
+name: Production Docker Deployment Pipeline
+
+# Trigger: Run automatically whenever code is pushed to the main branch
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  # ==========================================
+  # JOB 1: COMPILE AND REGISTRY PACKAGING
+  # ==========================================
+  build-and-push:
+    runs-on: ubuntu-latest # Tells GitHub to use a fresh Linux cloud VM
+    steps:
+      - name: 1. Clone Code to Cloud VM
+        uses: actions/checkout@v3
+
+      - name: 2. Authenticate with Docker Hub Registry
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 3. Compile TypeScript & Build Compressed Container Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true  # Automatically uploads the image to Docker Hub upon success
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/node-ts-api:latest
+
+  # ==========================================
+  # JOB 2: REMOTE RECONSTRUCTION ON AWS
+  # ==========================================
+  deploy-to-aws-ec2:
+    needs: build-and-push # Enforces that AWS deployment only runs if Job 1 passes
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH Connect and Run Production Image Inside AWS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Step A: Update systems and verify Docker engine status on AWS
+            if ! command -v docker &> /dev/null; then
+              sudo apt-get update && sudo apt-get install docker.io -y
+              sudo systemctl start docker
+              sudo usermod -aG docker ubuntu
+            fi
+            
+            # Step B: Stop and prune old server iterations to prevent port collisions
+            sudo docker stop node-app || true
+            sudo docker rm node-app || true
+            
+            # Step C: Fetch the freshly built image from your registry
+            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/node-ts-api:latest
+            
+            # Step D: Deploy container running on production Port 80
+            sudo docker run -d \
+              -p 80:3000 \
+              --name node-app \
+              -e MONGO_URI="${{ secrets.MONGO_URI }}" \
+              ${{ secrets.DOCKERHUB_USERNAME }}/node-ts-api:latest
