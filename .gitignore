@@ -1,0 +1,15 @@
+# Dependency folders (never commit these)
+node_modules/
+jspm_packages/
+
+# Local configuration files containing secret passwords
+.env
+.env.local
+.env.production
+
+# Compiled JavaScript code (optional, since GitHub Actions builds it from scratch)
+dist/
+
+# Operating system metadata files
+.DS_Store
+Thumbs.db
